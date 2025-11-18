@@ -2,3 +2,4 @@
 node_modules
 .github/*.md
 .vscode-test/*
+dist
