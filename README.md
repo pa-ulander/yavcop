@@ -1,4 +1,4 @@
-[](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)!  
+![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
 # YAVCOP - yet-another-vscode-color-picker
 
