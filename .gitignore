@@ -1,3 +1,4 @@
 *.vsix
 vsc-extension-*.md
 node_modules
+.github/*.md
