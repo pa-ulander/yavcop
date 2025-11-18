@@ -701,5 +701,21 @@ function refreshVisibleEditors() {
     });
 }
 
+// Export selected internals for targeted unit tests.
+export const __testing = {
+    parseColor,
+    getFormatPriority,
+    formatColorByFormat,
+    collectColorData,
+    provideDocumentColors,
+    computeColorData,
+    ensureColorData,
+    getNativeColorRangeKeys,
+    registerLanguageProviders,
+    shouldDecorate,
+    colorDataCache,
+    pendingColorComputations
+};
+
 
 
