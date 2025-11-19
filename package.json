@@ -28,6 +28,12 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "yavcop.reindexCSSFiles",
+        "title": "YAVCOP: Re-index CSS Variables"
+      }
+    ],
     "configuration": {
       "title": "YAVCOP",
       "properties": {
