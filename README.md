@@ -1,8 +1,8 @@
 [![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
-## ColorBuddy - Your best friend when working with colors
+# YAVCOP - yet-another-vscode-color-picker
 
-A universal color intelligence toolkit for VS Code. Instantly highlights, previews, and analyzes color codes, CSS variables, and Tailwind classes across dozens of languages  within code, markup, config, and Markdown. Dives deep into palette management, accessibility checks, and custom variable tracing for your workspace.
+Adds a color indicator and mouseover information anywhere a common color code is found in text or code. Makes color management suck less.
 
 ## Features
 
@@ -11,6 +11,9 @@ A universal color intelligence toolkit for VS Code. Instantly highlights, previe
 *   **Native VS Code color picker** available on click for supported values
 *   **Configurable language support** via the `yavcop.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
+
+<img src="/img/color-preview.png" />
+<img src="/img/tailwind-color-preview.png" />
 
 ## Usage
 
