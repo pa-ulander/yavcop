@@ -655,13 +655,13 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     
                     if (!declarations || declarations.length === 0) {
                         // Handle undefined variable
-                        markdown.appendMarkdown(`### ⚠️ CSS Variable Not Found\n\n`);
+                        markdown.appendMarkdown(`### CSS Variable Not Found\n\n`);
                         markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
                         markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
                         markdown.appendMarkdown(`This variable is not defined in any CSS files in the workspace.\n\n`);
                         markdown.appendMarkdown(`*Make sure the variable is declared in a CSS file.*`);
                     } else {
-                        markdown.appendMarkdown(`### 🎨 CSS Variable Color\n\n`);
+                        markdown.appendMarkdown(`### CSS Variable Color\n\n`);
                         markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
                         
                         // Sort by specificity (root first, then themed variants)
@@ -675,37 +675,25 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
                         markdown.appendMarkdown(`---\n\n`);
                         
-                        // Show resolved values for different contexts with color swatches
+                        // Show resolved values for different contexts
                         if (rootDecl) {
                             const resolvedRoot = resolveNestedVariables(rootDecl.value);
-                            const parsedRoot = parseColor(resolvedRoot);
-                            if (parsedRoot) {
-                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedRoot.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
-                            }
                             markdown.appendMarkdown(`**Default:** \`${resolvedRoot}\`\n\n`);
-                            markdown.appendMarkdown(`📍 Defined in \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`Defined in \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
                         }
                         
                         // Show light theme variant if available
                         if (lightDecl && lightDecl !== rootDecl) {
                             const resolvedLight = resolveNestedVariables(lightDecl.value);
-                            const parsedLight = parseColor(resolvedLight);
-                            if (parsedLight) {
-                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedLight.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
-                            }
-                            markdown.appendMarkdown(`**☀️ Light Theme:** \`${resolvedLight}\`\n\n`);
-                            markdown.appendMarkdown(`📍 Defined in \`${lightDecl.selector}\` at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`**Light Theme:** \`${resolvedLight}\`\n\n`);
+                            markdown.appendMarkdown(`Defined in \`${lightDecl.selector}\` at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
                         }
                         
                         // Show dark theme variant if available
                         if (darkDecl) {
                             const resolvedDark = resolveNestedVariables(darkDecl.value);
-                            const parsedDark = parseColor(resolvedDark);
-                            if (parsedDark) {
-                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedDark.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
-                            }
-                            markdown.appendMarkdown(`**🌙 Dark Theme:** \`${resolvedDark}\`\n\n`);
-                            markdown.appendMarkdown(`📍 Defined in \`${darkDecl.selector}\` at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`**Dark Theme:** \`${resolvedDark}\`\n\n`);
+                            markdown.appendMarkdown(`Defined in \`${darkDecl.selector}\` at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
                         }
                         
                         // Show all other definition locations
@@ -715,10 +703,6 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             markdown.appendMarkdown(`**Other Definitions (${otherDecls.length}):**\n\n`);
                             for (const decl of otherDecls) {
                                 const resolvedOther = resolveNestedVariables(decl.value);
-                                const parsedOther = parseColor(resolvedOther);
-                                if (parsedOther) {
-                                    markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedOther.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
-                                }
                                 markdown.appendMarkdown(`\`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
                             }
                         }
@@ -728,8 +712,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     }
                 } else {
                     // Show regular color information with format details
-                    markdown.appendMarkdown(`### 🎨 Color Preview\n\n`);
-                    markdown.appendMarkdown(`<span style="display:inline-block;width:24px;height:24px;background-color:${data.normalizedColor};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                    markdown.appendMarkdown(`### Color Preview\n\n`);
                     markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
                     
                     // Detect format type
