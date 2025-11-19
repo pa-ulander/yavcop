@@ -153,6 +153,31 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(reindexCommand);
 
+    // Register command to show color palette
+    const showPaletteCommand = vscode.commands.registerCommand('yavcop.showColorPalette', () => {
+        const palette = extractWorkspaceColorPalette();
+        const items = Array.from(palette.entries()).map(([colorString, color]) => {
+            const r = Math.round(color.red * 255);
+            const g = Math.round(color.green * 255);
+            const b = Math.round(color.blue * 255);
+            return {
+                label: colorString,
+                description: `RGB(${r}, ${g}, ${b})`,
+                detail: `Used in workspace CSS variables`
+            };
+        });
+        
+        if (items.length === 0) {
+            void vscode.window.showInformationMessage('No colors found in workspace CSS variables.');
+        } else {
+            void vscode.window.showQuickPick(items, {
+                title: `Workspace Color Palette (${items.length} unique colors)`,
+                placeHolder: 'Browse colors defined in your CSS variables'
+            });
+        }
+    });
+    context.subscriptions.push(showPaletteCommand);
+
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(editor => {
             if (editor) {
@@ -821,6 +846,22 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     }
                     markdown.appendMarkdown(`\n\n`);
                     
+                    // Add accessibility check against common backgrounds
+                    const luminance = getRelativeLuminance(data.vscodeColor);
+                    const white = new vscode.Color(1, 1, 1, 1);
+                    const black = new vscode.Color(0, 0, 0, 1);
+                    
+                    const contrastWhite = getContrastRatio(data.vscodeColor, white);
+                    const contrastBlack = getContrastRatio(data.vscodeColor, black);
+                    
+                    markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                    
+                    const whiteLevel = getAccessibilityLevel(contrastWhite);
+                    const blackLevel = getAccessibilityLevel(contrastBlack);
+                    
+                    markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                    markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
+                    
                     markdown.appendMarkdown(`---\n\n`);
                     markdown.appendMarkdown(`*Click the color value to open VS Code's color picker for conversions and adjustments.*`);
                 }
@@ -1294,6 +1335,61 @@ function refreshVisibleEditors() {
     vscode.window.visibleTextEditors.forEach(editor => {
         void refreshEditor(editor);
     });
+}
+
+// Color accessibility utilities
+function getRelativeLuminance(color: vscode.Color): number {
+    // Convert RGB to relative luminance using WCAG formula
+    const rsRGB = color.red;
+    const gsRGB = color.green;
+    const bsRGB = color.blue;
+    
+    const r = rsRGB <= 0.03928 ? rsRGB / 12.92 : Math.pow((rsRGB + 0.055) / 1.055, 2.4);
+    const g = gsRGB <= 0.03928 ? gsRGB / 12.92 : Math.pow((gsRGB + 0.055) / 1.055, 2.4);
+    const b = bsRGB <= 0.03928 ? bsRGB / 12.92 : Math.pow((bsRGB + 0.055) / 1.055, 2.4);
+    
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function getContrastRatio(color1: vscode.Color, color2: vscode.Color): number {
+    const lum1 = getRelativeLuminance(color1);
+    const lum2 = getRelativeLuminance(color2);
+    const lighter = Math.max(lum1, lum2);
+    const darker = Math.min(lum1, lum2);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
+function getAccessibilityLevel(ratio: number): { level: string; passes: string[] } {
+    const passes: string[] = [];
+    if (ratio >= 7) {
+        passes.push('AAA (normal)', 'AAA (large)', 'AA (normal)', 'AA (large)');
+        return { level: 'AAA', passes };
+    } else if (ratio >= 4.5) {
+        passes.push('AA (normal)', 'AA (large)', 'AAA (large)');
+        return { level: 'AA', passes };
+    } else if (ratio >= 3) {
+        passes.push('AA (large)');
+        return { level: 'AA Large', passes };
+    }
+    return { level: 'Fail', passes: [] };
+}
+
+// Extract unique colors from workspace
+function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
+    const palette = new Map<string, vscode.Color>();
+    
+    // Extract from CSS variables
+    for (const declarations of cssVariableRegistry.values()) {
+        for (const decl of declarations) {
+            const resolved = resolveNestedVariables(decl.value);
+            const parsed = parseColor(resolved);
+            if (parsed) {
+                palette.set(parsed.cssString, parsed.vscodeColor);
+            }
+        }
+    }
+    
+    return palette;
 }
 
 // Export selected internals for targeted unit tests.

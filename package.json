@@ -32,6 +32,10 @@
       {
         "command": "yavcop.reindexCSSFiles",
         "title": "YAVCOP: Re-index CSS Variables"
+      },
+      {
+        "command": "yavcop.showColorPalette",
+        "title": "YAVCOP: Show Workspace Color Palette"
       }
     ],
     "configuration": {
