@@ -822,19 +822,32 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             markdown.appendMarkdown(`Defined in \`${darkDecl.selector}\` at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
                         }
                         
-                        // Show all other definition locations
+                        // Show all other definition locations (deduplicated by resolved value)
                         const otherDecls = sorted.filter(d => d !== rootDecl && d !== darkDecl && d !== lightDecl);
                         if (otherDecls.length > 0) {
-                            markdown.appendMarkdown(`---\n\n`);
-                            markdown.appendMarkdown(`**Other Definitions (${otherDecls.length}):**\n\n`);
-                            for (const decl of otherDecls) {
-                                const resolvedOther = resolveNestedVariables(decl.value);
-                                const otherParsed = parseColor(resolvedOther);
-                                if (otherParsed) {
-                                    const swatchUri = createColorSwatchDataUri(otherParsed.cssString);
-                                    markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
-                                } else {
-                                    markdown.appendMarkdown(`\`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                            // Deduplicate by resolved value
+                            const seenValues = new Set<string>();
+                            const uniqueOtherDecls = otherDecls.filter(decl => {
+                                const resolved = resolveNestedVariables(decl.value);
+                                if (seenValues.has(resolved)) {
+                                    return false;
+                                }
+                                seenValues.add(resolved);
+                                return true;
+                            });
+                            
+                            if (uniqueOtherDecls.length > 0) {
+                                markdown.appendMarkdown(`---\n\n`);
+                                markdown.appendMarkdown(`**Other Definitions (${uniqueOtherDecls.length}):**\n\n`);
+                                for (const decl of uniqueOtherDecls) {
+                                    const resolvedOther = resolveNestedVariables(decl.value);
+                                    const otherParsed = parseColor(resolvedOther);
+                                    if (otherParsed) {
+                                        const swatchUri = createColorSwatchDataUri(otherParsed.cssString);
+                                        markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                                    } else {
+                                        markdown.appendMarkdown(`\`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                                    }
                                 }
                             }
                         }
