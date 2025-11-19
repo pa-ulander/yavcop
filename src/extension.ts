@@ -28,6 +28,8 @@ interface ColorData {
     isCssVariable?: boolean;
     variableName?: string;
     isWrappedInFunction?: boolean;
+    isTailwindClass?: boolean;
+    tailwindClass?: string;
 }
 
 interface CSSVariableReference {
@@ -637,7 +639,70 @@ function collectColorData(document: vscode.TextDocument, text: string): ColorDat
         collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
     }
 
+    // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
+    const tailwindClassRegex = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
+    let twClassMatch: RegExpExecArray | null;
+    while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
+        collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges);
+    }
+
     return results;
+}
+
+function collectTailwindClass(
+    document: vscode.TextDocument,
+    startIndex: number,
+    fullMatch: string,
+    colorName: string,
+    results: ColorData[],
+    seenRanges: Set<string>
+): void {
+    // Map Tailwind class to CSS variable name
+    const variableName = `--${colorName}`;
+    
+    const range = new vscode.Range(
+        document.positionAt(startIndex),
+        document.positionAt(startIndex + fullMatch.length)
+    );
+
+    const key = rangeKey(range);
+    if (seenRanges.has(key)) {
+        return;
+    }
+
+    // Try to resolve the CSS variable
+    const declarations = cssVariableRegistry.get(variableName);
+    if (!declarations || declarations.length === 0) {
+        // Class doesn't map to a known CSS variable
+        return;
+    }
+
+    // Use the first declaration (prioritize :root context)
+    const declaration = declarations.sort((a, b) => 
+        a.context.specificity - b.context.specificity
+    )[0];
+    
+    // Resolve nested variables recursively
+    let colorValue = resolveNestedVariables(declaration.value);
+
+    // Try to parse the resolved value as a color
+    const parsed = parseColor(colorValue);
+    if (!parsed) {
+        return;
+    }
+
+    seenRanges.add(key);
+
+    results.push({
+        range,
+        originalText: fullMatch,
+        normalizedColor: parsed.cssString,
+        vscodeColor: parsed.vscodeColor,
+        isTailwindClass: true,
+        tailwindClass: fullMatch,
+        isCssVariable: true,
+        variableName: variableName
+    });
 }
 
 async function provideColorHover(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Hover | undefined> {
@@ -650,7 +715,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                 markdown.supportHtml = true;
 
                 if (data.isCssVariable && data.variableName) {
-                    // Show CSS variable information with enhanced formatting
+                    // Show CSS variable or Tailwind class information
                     const declarations = cssVariableRegistry.get(data.variableName);
                     
                     if (!declarations || declarations.length === 0) {
@@ -661,8 +726,16 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         markdown.appendMarkdown(`This variable is not defined in any CSS files in the workspace.\n\n`);
                         markdown.appendMarkdown(`*Make sure the variable is declared in a CSS file.*`);
                     } else {
-                        markdown.appendMarkdown(`### CSS Variable Color\n\n`);
-                        markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                        // Check if this is a Tailwind class
+                        if (data.isTailwindClass && data.tailwindClass) {
+                            markdown.appendMarkdown(`### Tailwind Color Class\n\n`);
+                            markdown.appendMarkdown(`\`${data.tailwindClass}\`\n\n`);
+                            markdown.appendMarkdown(`**Maps to:** \`${data.variableName}\`\n\n`);
+                            markdown.appendMarkdown(`---\n\n`);
+                        } else {
+                            markdown.appendMarkdown(`### CSS Variable Color\n\n`);
+                            markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                        }
                         
                         // Sort by specificity (root first, then themed variants)
                         const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
@@ -672,8 +745,10 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         const darkDecl = sorted.find(d => d.context.themeHint === 'dark');
                         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
                         
-                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
-                        markdown.appendMarkdown(`---\n\n`);
+                        if (!data.isTailwindClass) {
+                            markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                            markdown.appendMarkdown(`---\n\n`);
+                        }
                         
                         // Show resolved values for different contexts
                         if (rootDecl) {
