@@ -15,6 +15,8 @@ interface DocumentColorCache {
 
 const colorDataCache = new Map<string, DocumentColorCache>();
 const pendingColorComputations = new Map<string, Promise<ColorData[]>>();
+const cssVariableRegistry = new Map<string, CSSVariableDeclaration[]>();
+const cssVariableDecorations = new Map<string, vscode.TextEditorDecorationType>();
 let providerSubscriptions: vscode.Disposable[] = [];
 let isProbingNativeColors = false;
 
@@ -23,6 +25,23 @@ interface ColorData {
     originalText: string;
     normalizedColor: string;
     vscodeColor: vscode.Color;
+    isCssVariable?: boolean;
+    variableName?: string;
+    isWrappedInFunction?: boolean;
+}
+
+interface CSSVariableReference {
+    range: vscode.Range;
+    variableName: string;
+    wrappingFunction?: 'hsl' | 'rgb' | 'rgba' | 'hsla';
+}
+
+interface CSSVariableDeclaration {
+    name: string;
+    value: string;
+    uri: vscode.Uri;
+    line: number;
+    selector: string;
 }
 
 const DEFAULT_LANGUAGES = [
@@ -73,9 +92,55 @@ const DEFAULT_LANGUAGES = [
 export function activate(context: vscode.ExtensionContext) {
     console.log('[yavcop] activating...');
 
-    registerLanguageProviders(context);
+    // Index CSS files for variable definitions first (before registering providers)
+    const indexingPromise = indexWorkspaceCSSFiles();
 
-    refreshVisibleEditors();
+    // Watch for CSS file changes
+    const cssWatcher = vscode.workspace.createFileSystemWatcher('**/*.css');
+    cssWatcher.onDidChange(uri => {
+        void vscode.workspace.openTextDocument(uri).then(doc => {
+            void parseCSSFile(doc).then(() => {
+                // Refresh all visible editors after CSS changes
+                refreshVisibleEditors();
+            });
+        });
+    });
+    cssWatcher.onDidCreate(uri => {
+        void vscode.workspace.openTextDocument(uri).then(doc => {
+            void parseCSSFile(doc).then(() => {
+                refreshVisibleEditors();
+            });
+        });
+    });
+    cssWatcher.onDidDelete(uri => {
+        // Remove variables from this file
+        for (const [varName, declarations] of cssVariableRegistry.entries()) {
+            const filtered = declarations.filter(d => d.uri.toString() !== uri.toString());
+            if (filtered.length === 0) {
+                cssVariableRegistry.delete(varName);
+            } else {
+                cssVariableRegistry.set(varName, filtered);
+            }
+        }
+        // Refresh after deletion
+        refreshVisibleEditors();
+    });
+    context.subscriptions.push(cssWatcher);
+
+    // Wait for indexing to complete, then register providers and refresh
+    void indexingPromise.then(() => {
+        console.log('[yavcop] Initial indexing complete, registering providers');
+        registerLanguageProviders(context);
+        refreshVisibleEditors();
+    });
+
+    // Register command to re-index CSS files (useful for debugging)
+    const reindexCommand = vscode.commands.registerCommand('yavcop.reindexCSSFiles', async () => {
+        await indexWorkspaceCSSFiles();
+        refreshVisibleEditors();
+        void vscode.window.showInformationMessage(`YAVCOP: Re-indexed ${cssVariableRegistry.size} CSS variables`);
+    });
+    context.subscriptions.push(reindexCommand);
 
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(editor => {
@@ -112,7 +177,8 @@ async function refreshEditor(editor: vscode.TextEditor): Promise<void> {
     }
 
     try {
-        await ensureColorData(editor.document);
+        const colorData = await ensureColorData(editor.document);
+        applyCSSVariableDecorations(editor, colorData);
     } catch (error) {
         console.error('[yavcop] failed to refresh color data', error);
     }
@@ -211,6 +277,197 @@ function clearColorCacheForDocument(document: vscode.TextDocument) {
     pendingColorComputations.delete(key);
 }
 
+function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
+    // Clear previous decorations for this editor
+    const editorKey = editor.document.uri.toString();
+    const existingDecorations = cssVariableDecorations.get(editorKey);
+    if (existingDecorations) {
+        existingDecorations.dispose();
+    }
+
+    // Collect all CSS variable ranges, but skip those wrapped in color functions
+    const cssVarRanges: vscode.Range[] = [];
+    const colorsByRange = new Map<string, string>();
+    
+    for (const data of colorData) {
+        if (data.isCssVariable && !data.isWrappedInFunction) {
+            cssVarRanges.push(data.range);
+            const rangeKey = `${data.range.start.line}:${data.range.start.character}`;
+            colorsByRange.set(rangeKey, data.normalizedColor);
+        }
+    }
+
+    if (cssVarRanges.length === 0) {
+        cssVariableDecorations.delete(editorKey);
+        return;
+    }
+
+    // Create a single decoration type for all CSS variables
+    const decoration = vscode.window.createTextEditorDecorationType({
+        before: {
+            contentText: '',
+            border: '1px solid',
+            borderColor: '#999',
+            width: '16px',
+            height: '16px',
+            margin: '1px 8px 0 0'
+        },
+        backgroundColor: 'transparent'
+    });
+
+    // Apply decorations with individual colors
+    const decorationRangesWithOptions: { range: vscode.Range; renderOptions?: vscode.DecorationRenderOptions }[] = [];
+    for (const range of cssVarRanges) {
+        const rangeKey = `${range.start.line}:${range.start.character}`;
+        const color = colorsByRange.get(rangeKey);
+        if (color) {
+            decorationRangesWithOptions.push({
+                range,
+                renderOptions: {
+                    before: {
+                        backgroundColor: color,
+                        border: '1px solid #999',
+                        width: '16px',
+                        height: '16px',
+                        margin: '1px 8px 0 0'
+                    }
+                }
+            });
+        }
+    }
+
+    if (decorationRangesWithOptions.length > 0) {
+        editor.setDecorations(decoration, decorationRangesWithOptions);
+        cssVariableDecorations.set(editorKey, decoration);
+    }
+}
+
+async function parseCSSFile(document: vscode.TextDocument): Promise<void> {
+    const text = document.getText();
+    
+    // Simple regex-based CSS variable extraction
+    // Matches patterns like: --variable-name: value;
+    const cssVarRegex = /(--[\w-]+)\s*:\s*([^;]+);/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = cssVarRegex.exec(text)) !== null) {
+        const varName = match[1];
+        const value = match[2].trim();
+        
+        // Find which selector this variable belongs to
+        const position = document.positionAt(match.index);
+        const selector = findContainingSelector(text, match.index);
+        
+        const declaration: CSSVariableDeclaration = {
+            name: varName,
+            value: value,
+            uri: document.uri,
+            line: position.line,
+            selector: selector
+        };
+
+        // Add to registry
+        if (!cssVariableRegistry.has(varName)) {
+            cssVariableRegistry.set(varName, []);
+        }
+        cssVariableRegistry.get(varName)!.push(declaration);
+    }
+}
+
+function findContainingSelector(text: string, varIndex: number): string {
+    // Find the nearest selector before this variable declaration
+    // Look backwards for the opening brace, then find the selector
+    const beforeVar = text.substring(0, varIndex);
+    const lastOpenBrace = beforeVar.lastIndexOf('{');
+    
+    if (lastOpenBrace === -1) {
+        return ':root';
+    }
+
+    // Find the selector before the brace
+    const beforeBrace = text.substring(0, lastOpenBrace);
+    const lines = beforeBrace.split('\n');
+    
+    // Go backwards to find the selector
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (line && !line.startsWith('/*') && !line.endsWith('*/')) {
+            return line.replace(/\s+/g, ' ').trim();
+        }
+    }
+    
+    return ':root';
+}
+
+async function indexWorkspaceCSSFiles(): Promise<void> {
+    console.log('[yavcop] Indexing CSS files for variable definitions...');
+    cssVariableRegistry.clear();
+
+    const cssFiles = await vscode.workspace.findFiles('**/*.css', '**/node_modules/**', 100);
+    
+    for (const fileUri of cssFiles) {
+        try {
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            await parseCSSFile(document);
+        } catch (error) {
+            console.error(`[yavcop] Error parsing CSS file ${fileUri.fsPath}:`, error);
+        }
+    }
+}
+
+function collectCSSVariableReference(
+    document: vscode.TextDocument,
+    startIndex: number,
+    fullMatch: string,
+    variableName: string,
+    results: ColorData[],
+    seenRanges: Set<string>,
+    wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba'
+): void {
+    const range = new vscode.Range(
+        document.positionAt(startIndex),
+        document.positionAt(startIndex + fullMatch.length)
+    );
+
+    const key = rangeKey(range);
+    if (seenRanges.has(key)) {
+        return;
+    }
+
+    // Try to resolve the CSS variable
+    const declarations = cssVariableRegistry.get(variableName);
+    if (!declarations || declarations.length === 0) {
+        return;
+    }
+
+    // Use the first declaration (from :root or most common context)
+    const declaration = declarations[0];
+    let colorValue = declaration.value;
+
+    // If wrapped in a color function, prepend it
+    if (wrappingFunction) {
+        colorValue = `${wrappingFunction}(${colorValue})`;
+    }
+
+    // Try to parse the resolved value as a color
+    const parsed = parseColor(colorValue);
+    if (!parsed) {
+        return;
+    }
+
+    seenRanges.add(key);
+
+    results.push({
+        range,
+        originalText: fullMatch,
+        normalizedColor: parsed.cssString,
+        vscodeColor: parsed.vscodeColor,
+        isCssVariable: true,
+        variableName: variableName,
+        isWrappedInFunction: !!wrappingFunction
+    });
+}
+
 function collectColorData(document: vscode.TextDocument, text: string): ColorData[] {
     const results: ColorData[] = [];
     const seenRanges = new Set<string>();
@@ -260,6 +517,20 @@ function collectColorData(document: vscode.TextDocument, text: string): ColorDat
         pushMatch(tailwindMatch.index, tailwindMatch[1]);
     }
 
+    // Detect CSS variables: var(--variable-name)
+    const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
+    let varMatch: RegExpExecArray | null;
+    while ((varMatch = varRegex.exec(text)) !== null) {
+        collectCSSVariableReference(document, varMatch.index, varMatch[0], varMatch[1], results, seenRanges);
+    }
+
+    // Detect CSS variables wrapped in color functions: hsl(var(--variable)), rgb(var(--variable))
+    const varInFuncRegex = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+    let varInFuncMatch: RegExpExecArray | null;
+    while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
+        collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
+    }
+
     return results;
 }
 
@@ -272,9 +543,32 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                 markdown.isTrusted = true;
                 markdown.supportHtml = true;
 
-                markdown.appendMarkdown(`**Color Preview**\n\n`);
-                markdown.appendMarkdown(`<span style="display:inline-block;width:20px;height:20px;background-color:${data.normalizedColor};border:1px solid #000;vertical-align:middle;"></span> \`${data.originalText}\``);
-                markdown.appendMarkdown(`\n\n*Click the color value to open VS Code's color picker.*`);
+                if (data.isCssVariable && data.variableName) {
+                    // Show CSS variable information (color swatch shown inline in code)
+                    markdown.appendMarkdown(`**CSS Variable Color**\n\n`);
+                    markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                    
+                    // Find the declaration
+                    const declarations = cssVariableRegistry.get(data.variableName);
+                    if (declarations && declarations.length > 0) {
+                        const decl = declarations[0];
+                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                        markdown.appendMarkdown(`**Resolved Value:** \`${decl.value}\`\n\n`);
+                        markdown.appendMarkdown(`**Defined in:** \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                        
+                        // Show additional contexts if available
+                        if (declarations.length > 1) {
+                            markdown.appendMarkdown(`**Also defined in ${declarations.length - 1} other context(s)**\n\n`);
+                        }
+                        
+                        markdown.appendMarkdown(`*Click the file link to view the definition. The color swatch appears inline to the left.*`);
+                    }
+                } else {
+                    // Show regular color information
+                    markdown.appendMarkdown(`**Color Preview**\n\n`);
+                    markdown.appendMarkdown(`<span style="display:inline-block;width:20px;height:20px;background-color:${data.normalizedColor};border:1px solid #000;vertical-align:middle;"></span> \`${data.originalText}\``);
+                    markdown.appendMarkdown(`\n\n*Click the color value to open VS Code's color picker.*`);
+                }
 
                 return new vscode.Hover(markdown, data.range);
             }
@@ -288,11 +582,25 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
 
 function clearDecorationsForEditor(editor: vscode.TextEditor) {
     clearColorCacheForDocument(editor.document);
+    
+    // Clear CSS variable decorations
+    const editorKey = editor.document.uri.toString();
+    const decoration = cssVariableDecorations.get(editorKey);
+    if (decoration) {
+        decoration.dispose();
+        cssVariableDecorations.delete(editorKey);
+    }
 }
 
 function clearAllDecorations() {
     colorDataCache.clear();
     pendingColorComputations.clear();
+    
+    // Dispose all CSS variable decorations
+    for (const decoration of cssVariableDecorations.values()) {
+        decoration.dispose();
+    }
+    cssVariableDecorations.clear();
 }
 
 async function provideDocumentColors(document: vscode.TextDocument): Promise<vscode.ColorInformation[]> {
@@ -302,7 +610,10 @@ async function provideDocumentColors(document: vscode.TextDocument): Promise<vsc
 
     try {
         const colors = await ensureColorData(document);
-        return colors.map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
+        // Exclude CSS variables from the color picker - they're shown in hover tooltips only
+        return colors
+            .filter(data => !data.isCssVariable)
+            .map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
     } catch (error) {
         console.error('[yavcop] failed to provide document colors', error);
         return [];
