@@ -317,9 +317,9 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
             contentText: '',
             border: '1px solid',
             borderColor: '#999',
-            width: '16px',
-            height: '16px',
-            margin: '1px 8px 0 0'
+            width: '10px',
+            height: '10px',
+            margin: '1px 4px 0 0'
         },
         backgroundColor: 'transparent'
     });
@@ -336,9 +336,9 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
                     before: {
                         backgroundColor: color,
                         border: '1px solid #999',
-                        width: '16px',
-                        height: '16px',
-                        margin: '1px 8px 0 0'
+                        width: '10px',
+                        height: '10px',
+                        margin: '1px 4px 0 0'
                     }
                 }
             });
