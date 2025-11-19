@@ -42,6 +42,15 @@ interface CSSVariableDeclaration {
     uri: vscode.Uri;
     line: number;
     selector: string;
+    context: CSSVariableContext;
+    resolvedValue?: string; // Cached resolved value after nested variable expansion
+}
+
+interface CSSVariableContext {
+    type: 'root' | 'class' | 'media' | 'other';
+    themeHint?: 'light' | 'dark'; // Detected from selector (e.g., .dark, [data-theme="dark"])
+    mediaQuery?: string; // For @media contexts
+    specificity: number; // CSS specificity score for context resolution
 }
 
 const DEFAULT_LANGUAGES = [
@@ -357,13 +366,15 @@ async function parseCSSFile(document: vscode.TextDocument): Promise<void> {
         // Find which selector this variable belongs to
         const position = document.positionAt(match.index);
         const selector = findContainingSelector(text, match.index);
+        const context = analyzeContext(selector);
         
         const declaration: CSSVariableDeclaration = {
             name: varName,
             value: value,
             uri: document.uri,
             line: position.line,
-            selector: selector
+            selector: selector,
+            context: context
         };
 
         // Add to registry
@@ -399,6 +410,54 @@ function findContainingSelector(text: string, varIndex: number): string {
     return ':root';
 }
 
+function analyzeContext(selector: string): CSSVariableContext {
+    const normalizedSelector = selector.toLowerCase().trim();
+    
+    // Calculate basic specificity (simplified CSS specificity)
+    let specificity = 0;
+    if (normalizedSelector === ':root' || normalizedSelector === 'html') {
+        specificity = 1;
+    } else if (normalizedSelector.includes('.')) {
+        specificity = 10 + (normalizedSelector.match(/\./g) || []).length * 10;
+    } else if (normalizedSelector.includes('#')) {
+        specificity = 100;
+    }
+    
+    // Detect context type
+    let type: 'root' | 'class' | 'media' | 'other' = 'other';
+    if (normalizedSelector === ':root' || normalizedSelector === 'html') {
+        type = 'root';
+    } else if (normalizedSelector.includes('.') || normalizedSelector.includes('[')) {
+        type = 'class';
+    } else if (normalizedSelector.includes('@media')) {
+        type = 'media';
+    }
+    
+    // Detect theme hints
+    let themeHint: 'light' | 'dark' | undefined;
+    if (normalizedSelector.includes('.dark') || 
+        normalizedSelector.includes('[data-theme="dark"]') ||
+        normalizedSelector.includes('[data-mode="dark"]')) {
+        themeHint = 'dark';
+    } else if (normalizedSelector.includes('.light') || 
+               normalizedSelector.includes('[data-theme="light"]')) {
+        themeHint = 'light';
+    }
+    
+    // Extract media query if present
+    let mediaQuery: string | undefined;
+    const mediaMatch = selector.match(/@media\s+([^{]+)/);
+    if (mediaMatch) {
+        mediaQuery = mediaMatch[1].trim();
+    }
+    
+    return {
+        type,
+        themeHint,
+        mediaQuery,
+        specificity
+    };
+}
 async function indexWorkspaceCSSFiles(): Promise<void> {
     console.log('[yavcop] Indexing CSS files for variable definitions...');
     cssVariableRegistry.clear();
@@ -413,6 +472,49 @@ async function indexWorkspaceCSSFiles(): Promise<void> {
             console.error(`[yavcop] Error parsing CSS file ${fileUri.fsPath}:`, error);
         }
     }
+}
+
+function resolveNestedVariables(
+    value: string, 
+    visitedVars: Set<string> = new Set()
+): string {
+    // Detect and resolve nested var() references recursively
+    const varPattern = /var\(\s*(--[\w-]+)\s*\)/g;
+    let match: RegExpExecArray | null;
+    let resolvedValue = value;
+    
+    while ((match = varPattern.exec(value)) !== null) {
+        const nestedVarName = match[1];
+        
+        // Circular reference detection
+        if (visitedVars.has(nestedVarName)) {
+            console.error(`[yavcop] Circular reference detected: ${nestedVarName}`);
+            return value; // Return original value to avoid infinite loop
+        }
+        
+        // Look up the nested variable
+        const nestedDeclarations = cssVariableRegistry.get(nestedVarName);
+        if (!nestedDeclarations || nestedDeclarations.length === 0) {
+            continue; // Can't resolve, keep as-is
+        }
+        
+        // Use the first declaration (prioritize :root)
+        const nestedDecl = nestedDeclarations.sort((a, b) => 
+            a.context.specificity - b.context.specificity
+        )[0];
+        
+        // Mark this variable as visited
+        const newVisited = new Set(visitedVars);
+        newVisited.add(nestedVarName);
+        
+        // Recursively resolve the nested variable's value
+        const nestedResolved = resolveNestedVariables(nestedDecl.value, newVisited);
+        
+        // Replace the var() reference with the resolved value
+        resolvedValue = resolvedValue.replace(match[0], nestedResolved);
+    }
+    
+    return resolvedValue;
 }
 
 function collectCSSVariableReference(
@@ -440,9 +542,13 @@ function collectCSSVariableReference(
         return;
     }
 
-    // Use the first declaration (from :root or most common context)
-    const declaration = declarations[0];
-    let colorValue = declaration.value;
+    // Use the first declaration (prioritize :root context)
+    const declaration = declarations.sort((a, b) => 
+        a.context.specificity - b.context.specificity
+    )[0];
+    
+    // Resolve nested variables recursively
+    let colorValue = resolveNestedVariables(declaration.value);
 
     // If wrapped in a color function, prepend it
     if (wrappingFunction) {
@@ -548,17 +654,42 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     markdown.appendMarkdown(`**CSS Variable Color**\n\n`);
                     markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
                     
-                    // Find the declaration
+                    // Find all declarations (including theme variants)
                     const declarations = cssVariableRegistry.get(data.variableName);
                     if (declarations && declarations.length > 0) {
-                        const decl = declarations[0];
-                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
-                        markdown.appendMarkdown(`**Resolved Value:** \`${decl.value}\`\n\n`);
-                        markdown.appendMarkdown(`**Defined in:** \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                        // Sort by specificity (root first, then themed variants)
+                        const sorted = declarations.sort((a, b) => a.context.specificity - b.context.specificity);
                         
-                        // Show additional contexts if available
-                        if (declarations.length > 1) {
-                            markdown.appendMarkdown(`**Also defined in ${declarations.length - 1} other context(s)**\n\n`);
+                        // Separate by theme
+                        const rootDecl = sorted.find(d => d.context.type === 'root');
+                        const darkDecl = sorted.find(d => d.context.themeHint === 'dark');
+                        const lightDecl = sorted.find(d => d.context.themeHint === 'light');
+                        
+                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                        
+                        // Show resolved values for different contexts
+                        if (rootDecl) {
+                            const resolvedRoot = resolveNestedVariables(rootDecl.value);
+                            markdown.appendMarkdown(`**Default Value:** \`${resolvedRoot}\`\n\n`);
+                            markdown.appendMarkdown(`**Defined in:** \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
+                        }
+                        
+                        // Show light theme variant if available
+                        if (lightDecl && lightDecl !== rootDecl) {
+                            const resolvedLight = resolveNestedVariables(lightDecl.value);
+                            markdown.appendMarkdown(`☀️ **Light Theme:** \`${resolvedLight}\` (in \`${lightDecl.selector}\`)\n\n`);
+                        }
+                        
+                        // Show dark theme variant if available
+                        if (darkDecl) {
+                            const resolvedDark = resolveNestedVariables(darkDecl.value);
+                            markdown.appendMarkdown(`🌙 **Dark Theme:** \`${resolvedDark}\` (in \`${darkDecl.selector}\`)\n\n`);
+                        }
+                        
+                        // Show count of other contexts
+                        const otherContexts = declarations.length - [rootDecl, darkDecl, lightDecl].filter(Boolean).length;
+                        if (otherContexts > 0) {
+                            markdown.appendMarkdown(`**+${otherContexts} other context(s)**\n\n`);
                         }
                         
                         markdown.appendMarkdown(`*Click the file link to view the definition. The color swatch appears inline to the left.*`);
