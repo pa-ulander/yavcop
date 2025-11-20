@@ -1,12 +1,12 @@
 {
-  "name": "yavcop",
+  "name": "codebuddy",
   "displayName": "YAVCOP - Yet Another VS Code Color Picker",
   "description": "Adds color indicators and the VS Code color picker to configurable document types.",
   "version": "0.0.1",
-  "publisher": "your-publisher-name",
+  "publisher": "PAUlander",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/yavcop"
+    "url": "https://github.com/pa-ulander/yavcop"
   },
   "keywords": [
     "color",

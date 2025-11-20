@@ -1,8 +1,10 @@
 [![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
-## ColorBuddy - Makes color management suck less
+<img src="https://github.com/pa-ulander/yavcop/blob/main/img/banner.png" width="50%" />
 
-Adds a color indicator and mouseover information anywhere a common color code is found in text or code. Makes color management suck less.
+## ColorBuddy - Makes color management easy in VS Code 
+
+Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions fast just like you are used to, and manage refactoring and accessability with ease.
 
 ## Features
 
