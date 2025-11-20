@@ -63,17 +63,18 @@ Add or remove identifiers to fit your workspace. Use `"*"` to enable color detec
 
 ## Installation
 
-This extension is a work in progress, and it is not yet on the VS Code Marketplace.  
-To install it manually:
+Install from VS Code Marketplace.
 
-1.  Download [color-buddy-0.0.1.vsix](color-buddy-0.0.1.vsix) or run `npm run package` to generate your own.
+Open VSCode and type ctrl+P, then type: ext install PAUlander.colorbuddy.
+
+
+Install from vsix binary:
+
+1.  Download [color-buddy-0.0.2.vsix](color-buddy-0.0.1.vsix) or run `npm run package` to generate your own.
 2.  In VS Code press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) and choose `Extensions: Install from VSIX...`.
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
-4.  Alternatively, install via CLI with `code --install-extension color-buddy-0.0.1.vsix`.
+4.  Alternatively, install via CLI with `code --install-extension color-buddy-0.0.2.vsix`.
 
-## Requirements
-
-VS Code 1.106.1 or higher
 
 ## License
 
