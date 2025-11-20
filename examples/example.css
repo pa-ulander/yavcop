@@ -76,4 +76,10 @@
   .bonk {
     color: var(--chart-4);
   }
+  .hardcoded {
+    color: #ff5733;
+  }
+  .hardcoded-rgb {
+    background-color: rgb(52, 152, 219);
+  }
 }

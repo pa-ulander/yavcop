@@ -64,21 +64,15 @@ const CardComponent = `
         Secondary
       </button>
     </div>
-
-
-
-  
-
-
-
-    
     <div class="bg-muted border-t border-border p-4">
       <span class="text-muted-foreground">Footer using theme variables</span>
       <div class="mt-2 flex gap-2">
-        <div class="w-8 h-8 rounded bg-[var(--chart-1)]" title="plums"></div>
-        <div class="w-8 h-8 rounded plums" title="plums"></div>
-        <div class="w-8 h-8 rounded plask" title="plask"></div>
-        <div class="w-8 h-8 rounded bonk" title="bonk"></div>
+      <div class="w-8 h-8 rounded plums" title="plums">Hello</div>
+      <div class="w-8 h-8 rounded plask" title="plask">Hello</div>
+      <div class="w-8 h-8 rounded bonk" title="bonk">Hello</div>
+      <div class="w-8 h-8 rounded hardcoded" title="hardcoded">Hello</div>
+      <div class="w-8 h-8 rounded hardcoded-rgb" title="hardcoded-rgb">Hello</div>
+      <div class="w-8 h-8 rounded bg-[var(--chart-1)]" title="blrpf"></div>
         <div class="w-8 h-8 rounded bg-[hsl(var(--chart-1))]" title="Chart 1"></div>
         <div class="w-8 h-8 rounded bg-[hsl(var(--chart-2))]" title="Chart 2"></div>
         <div class="w-8 h-8 rounded bg-[hsl(var(--chart-3))]" title="Chart 3"></div>

@@ -16,6 +16,7 @@ interface DocumentColorCache {
 const colorDataCache = new Map<string, DocumentColorCache>();
 const pendingColorComputations = new Map<string, Promise<ColorData[]>>();
 const cssVariableRegistry = new Map<string, CSSVariableDeclaration[]>();
+const cssClassColorRegistry = new Map<string, CSSClassColorDeclaration[]>();
 const cssVariableDecorations = new Map<string, vscode.TextEditorDecorationType>();
 let providerSubscriptions: vscode.Disposable[] = [];
 let isProbingNativeColors = false;
@@ -30,6 +31,8 @@ interface ColorData {
     isWrappedInFunction?: boolean;
     isTailwindClass?: boolean;
     tailwindClass?: string;
+    isCssClass?: boolean;
+    cssClassName?: string;
 }
 
 interface CSSVariableReference {
@@ -53,6 +56,15 @@ interface CSSVariableContext {
     themeHint?: 'light' | 'dark'; // Detected from selector (e.g., .dark, [data-theme="dark"])
     mediaQuery?: string; // For @media contexts
     specificity: number; // CSS specificity score for context resolution
+}
+
+interface CSSClassColorDeclaration {
+    className: string;
+    property: string; // 'color', 'background-color', etc.
+    value: string;
+    uri: vscode.Uri;
+    line: number;
+    selector: string;
 }
 
 const DEFAULT_LANGUAGES = [
@@ -321,19 +333,20 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
         existingDecorations.dispose();
     }
 
-    // Collect all CSS variable ranges, but skip those wrapped in color functions
-    const cssVarRanges: vscode.Range[] = [];
+    // Collect all CSS variable and CSS class color ranges
+    const decorationRanges: vscode.Range[] = [];
     const colorsByRange = new Map<string, string>();
     
     for (const data of colorData) {
-        if (data.isCssVariable && !data.isWrappedInFunction) {
-            cssVarRanges.push(data.range);
+        // Include CSS variables (not wrapped in functions) and CSS class colors
+        if ((data.isCssVariable && !data.isWrappedInFunction) || data.isCssClass) {
+            decorationRanges.push(data.range);
             const rangeKey = `${data.range.start.line}:${data.range.start.character}`;
             colorsByRange.set(rangeKey, data.normalizedColor);
         }
     }
 
-    if (cssVarRanges.length === 0) {
+    if (decorationRanges.length === 0) {
         cssVariableDecorations.delete(editorKey);
         return;
     }
@@ -353,7 +366,7 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
 
     // Apply decorations with individual colors
     const decorationRangesWithOptions: { range: vscode.Range; renderOptions?: vscode.DecorationRenderOptions }[] = [];
-    for (const range of cssVarRanges) {
+    for (const range of decorationRanges) {
         const rangeKey = `${range.start.line}:${range.start.character}`;
         const color = colorsByRange.get(rangeKey);
         if (color) {
@@ -409,6 +422,49 @@ async function parseCSSFile(document: vscode.TextDocument): Promise<void> {
             cssVariableRegistry.set(varName, []);
         }
         cssVariableRegistry.get(varName)!.push(declaration);
+    }
+    
+    // Extract CSS class colors
+    // Matches patterns like: .className { color: value; }
+    const colorPropertyRegex = /\.([\.\w-]+)\s*\{[^}]*?(color|background-color|border-color|background)\s*:\s*([^;]+);/g;
+    let colorMatch: RegExpExecArray | null;
+    
+    while ((colorMatch = colorPropertyRegex.exec(text)) !== null) {
+        const className = colorMatch[1];
+        const property = colorMatch[2];
+        const value = colorMatch[3].trim();
+        
+        // Try to resolve if it's a color value or CSS variable reference
+        let resolvedValue = value;
+        const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
+        if (varMatch) {
+            const varName = varMatch[1];
+            const varDeclarations = cssVariableRegistry.get(varName);
+            if (varDeclarations && varDeclarations.length > 0) {
+                resolvedValue = resolveNestedVariables(varDeclarations[0].value);
+            }
+        }
+        
+        // Check if the value is a color
+        const parsed = parseColor(resolvedValue);
+        if (parsed) {
+            const position = document.positionAt(colorMatch.index);
+            const selector = findContainingSelector(text, colorMatch.index);
+            
+            const declaration: CSSClassColorDeclaration = {
+                className: className,
+                property: property,
+                value: resolvedValue,
+                uri: document.uri,
+                line: position.line,
+                selector: selector
+            };
+            
+            if (!cssClassColorRegistry.has(className)) {
+                cssClassColorRegistry.set(className, []);
+            }
+            cssClassColorRegistry.get(className)!.push(declaration);
+        }
     }
 }
 
@@ -488,6 +544,7 @@ function analyzeContext(selector: string): CSSVariableContext {
 async function indexWorkspaceCSSFiles(): Promise<void> {
     console.log('[yavcop] Indexing CSS files for variable definitions...');
     cssVariableRegistry.clear();
+    cssClassColorRegistry.clear();
 
     const cssFiles = await vscode.workspace.findFiles('**/*.css', '**/node_modules/**', 100);
     
@@ -670,6 +727,18 @@ function collectColorData(document: vscode.TextDocument, text: string): ColorDat
     while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
         collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges);
     }
+    
+    // Detect CSS class names with color properties: plums, bonk, etc.
+    const classNameRegex = /class\s*=\s*["']([^"']+)["']/g;
+    let classMatch: RegExpExecArray | null;
+    while ((classMatch = classNameRegex.exec(text)) !== null) {
+        const classList = classMatch[1].split(/\s+/);
+        for (const className of classList) {
+            if (className && cssClassColorRegistry.has(className)) {
+                collectCSSClassColor(document, text, classMatch.index + classMatch[0].indexOf(className), className, results, seenRanges);
+            }
+        }
+    }
 
     return results;
 }
@@ -730,6 +799,52 @@ function collectTailwindClass(
     });
 }
 
+function collectCSSClassColor(
+    document: vscode.TextDocument,
+    text: string,
+    startIndex: number,
+    className: string,
+    results: ColorData[],
+    seenRanges: Set<string>
+): void {
+    const range = new vscode.Range(
+        document.positionAt(startIndex),
+        document.positionAt(startIndex + className.length)
+    );
+
+    const key = rangeKey(range);
+    if (seenRanges.has(key)) {
+        return;
+    }
+
+    // Get the CSS class color declarations
+    const declarations = cssClassColorRegistry.get(className);
+    if (!declarations || declarations.length === 0) {
+        return;
+    }
+
+    // Use the first declaration
+    const declaration = declarations[0];
+    
+    // Resolve any CSS variables in the value
+    const resolvedValue = resolveNestedVariables(declaration.value);
+    const parsed = parseColor(resolvedValue);
+    if (!parsed) {
+        return;
+    }
+
+    seenRanges.add(key);
+
+    results.push({
+        range,
+        originalText: className,
+        normalizedColor: parsed.cssString,
+        vscodeColor: parsed.vscodeColor,
+        isCssClass: true,
+        cssClassName: className
+    });
+}
+
 function createColorSwatchDataUri(color: string): string {
     const sanitizedColor = color.replace(/'/g, "\\'").replace(/"/g, '\\"');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="${sanitizedColor}" stroke="white" stroke-width="1" /></svg>`;
@@ -745,7 +860,42 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                 const markdown = new vscode.MarkdownString('', true); // Enable trusted mode from constructor
                 markdown.supportHtml = true;
 
-                if (data.isCssVariable && data.variableName) {
+                if (data.isCssClass && data.cssClassName) {
+                    // Show CSS class color information
+                    const declarations = cssClassColorRegistry.get(data.cssClassName);
+                    
+                    if (declarations && declarations.length > 0) {
+                        const swatchColor = rgbaString(data.vscodeColor, false);
+                        const swatchUri = createColorSwatchDataUri(swatchColor);
+                        markdown.appendMarkdown(`### CSS Class Color\n\n`);
+                        markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.cssClassName}\`\n\n`);
+                        
+                        markdown.appendMarkdown(`**Property:** \`${declarations[0].property}\`\n\n`);
+                        markdown.appendMarkdown(`**Value:** \`${declarations[0].value}\`\n\n`);
+                        
+                        markdown.appendMarkdown(`---\n\n`);
+                        
+                        for (const decl of declarations) {
+                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                        }
+                        
+                        // Add accessibility information
+                        const white = new vscode.Color(1, 1, 1, 1);
+                        const black = new vscode.Color(0, 0, 0, 1);
+                        
+                        const contrastWhite = getContrastRatio(data.vscodeColor, white);
+                        const contrastBlack = getContrastRatio(data.vscodeColor, black);
+                        
+                        markdown.appendMarkdown(`---\n\n`);
+                        markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                        
+                        const whiteLevel = getAccessibilityLevel(contrastWhite);
+                        const blackLevel = getAccessibilityLevel(contrastBlack);
+                        
+                        markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                        markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
+                    }
+                } else if (data.isCssVariable && data.variableName) {
                     // Show CSS variable or Tailwind class information
                     const declarations = cssVariableRegistry.get(data.variableName);
                     
@@ -793,7 +943,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             } else {
                                 markdown.appendMarkdown(`**Default:** \`${resolvedRoot}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined in \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
                         }
                         
                         // Show light theme variant if available
@@ -806,7 +956,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             } else {
                                 markdown.appendMarkdown(`**Light Theme:** \`${resolvedLight}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined in \`${lightDecl.selector}\` at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
                         }
                         
                         // Show dark theme variant if available
@@ -819,7 +969,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             } else {
                                 markdown.appendMarkdown(`**Dark Theme:** \`${resolvedDark}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined in \`${darkDecl.selector}\` at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
                         }
                         
                         // Show all other definition locations (deduplicated by resolved value)
@@ -844,14 +994,29 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                                     const otherParsed = parseColor(resolvedOther);
                                     if (otherParsed) {
                                         const swatchUri = createColorSwatchDataUri(otherParsed.cssString);
-                                        markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                                        markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${resolvedOther}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
                                     } else {
-                                        markdown.appendMarkdown(`\`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                                        markdown.appendMarkdown(`\`${resolvedOther}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
                                     }
                                 }
                             }
                         }
-
+                        
+                        // Add accessibility information for CSS variables and Tailwind classes
+                        const white = new vscode.Color(1, 1, 1, 1);
+                        const black = new vscode.Color(0, 0, 0, 1);
+                        
+                        const contrastWhite = getContrastRatio(data.vscodeColor, white);
+                        const contrastBlack = getContrastRatio(data.vscodeColor, black);
+                        
+                        markdown.appendMarkdown(`---\n\n`);
+                        markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                        
+                        const whiteLevel = getAccessibilityLevel(contrastWhite);
+                        const blackLevel = getAccessibilityLevel(contrastBlack);
+                        
+                        markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                        markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
                     }
                 } else {
                     // Show regular color information with format details
@@ -907,7 +1072,6 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
                     
                     markdown.appendMarkdown(`---\n\n`);
-                    markdown.appendMarkdown(`*Click the color swatch or value to open VS Code's color picker.*`);
                 }
 
                 return new vscode.Hover(markdown, data.range);
@@ -950,9 +1114,9 @@ async function provideDocumentColors(document: vscode.TextDocument): Promise<vsc
 
     try {
         const colors = await ensureColorData(document);
-        // Exclude CSS variables from the color picker - they're shown in hover tooltips only
+        // Exclude CSS variables and CSS classes from the color picker - they're shown in hover tooltips only
         return colors
-            .filter(data => !data.isCssVariable)
+            .filter(data => !data.isCssVariable && !data.isCssClass)
             .map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
     } catch (error) {
         console.error('[yavcop] failed to provide document colors', error);
