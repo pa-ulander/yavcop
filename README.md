@@ -1,6 +1,6 @@
 [![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
-<img src="https://github.com/pa-ulander/yavcop/blob/main/img/banner.png" width="50%" />
+<img src="https://github.com/pa-ulander/yavcop/blob/main/img/banner.png" width="100%" />
 
 ## ColorBuddy - Makes color management easy in VS Code 
 
