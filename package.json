@@ -1,12 +1,12 @@
 {
-  "name": "codebuddy",
-  "displayName": "YAVCOP - Yet Another VS Code Color Picker",
+  "name": "colorbuddy",
+  "displayName": "ColorBuddy - Your VS Code Color Companion",
   "description": "Adds color indicators and the VS Code color picker to configurable document types.",
   "version": "0.0.1",
   "publisher": "PAUlander",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pa-ulander/yavcop"
+    "url": "https://github.com/pa-ulander/color-buddy"
   },
   "keywords": [
     "color",
@@ -30,20 +30,20 @@
   "contributes": {
     "commands": [
       {
-        "command": "yavcop.reindexCSSFiles",
-        "title": "YAVCOP: Re-index CSS Variables"
+        "command": "colorbuddy.reindexCSSFiles",
+        "title": "ColorBuddy: Re-index CSS Variables"
       },
       {
-        "command": "yavcop.showColorPalette",
-        "title": "YAVCOP: Show Workspace Color Palette"
+        "command": "colorbuddy.showColorPalette",
+        "title": "ColorBuddy: Show Workspace Color Palette"
       }
     ],
     "configuration": {
-      "title": "YAVCOP",
+      "title": "ColorBuddy",
       "properties": {
-        "yavcop.languages": {
+        "colorbuddy.languages": {
           "type": "array",
-          "description": "Language identifiers where YAVCOP should detect colors and expose the color picker.",
+          "description": "Language identifiers where ColorBuddy should detect colors and expose the color picker.",
           "items": {
             "type": "string"
           },
