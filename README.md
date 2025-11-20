@@ -1,6 +1,6 @@
 [![Tests](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=color-buddy)
 
-<img src="https://github.com/pa-ulander/color-buddy/blob/main/img/banner.png" width="100%" />
+![](img/banner.png)
 
 ## ColorBuddy - Your VS Code Color Companion
 
@@ -12,9 +12,11 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **Mouseover preview** that shows the selected color and instructions
 *   **Native VS Code color picker** available on click for supported values
 *   **Configurable language support** via the `colorbuddy.languages` setting
-*   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
+*   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla  
 
-<img src="https://github.com/pa-ulander/color-buddy/blob/main/img/color-preview.png" width="49%" /> &nbsp; <img src="https://github.com/pa-ulander/color-buddy/blob/main/img/tailwind-color-class-preview.png" width="49%" />
+
+![](img/screen1.png) 
+ 
 
 ## Usage
 
