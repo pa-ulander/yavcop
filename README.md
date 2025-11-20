@@ -14,7 +14,7 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **Configurable language support** via the `yavcop.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
 
-<img src="https://github.com/pa-ulander/yavcop/blob/main/img/color-preview.png" width="49%" /><img src="https://github.com/pa-ulander/yavcop/blob/main/img/px.gif" width="10" /><img src="https://github.com/pa-ulander/yavcop/blob/main/img/tailwind-color-class-preview.png" width="49%" />
+<img src="https://github.com/pa-ulander/yavcop/blob/main/img/color-preview.png" width="49%" /> <img src="https://github.com/pa-ulander/yavcop/blob/main/img/tailwind-color-class-preview.png" width="49%" />
 
 ## Usage
 
