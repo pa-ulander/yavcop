@@ -1,8 +1,8 @@
 {
   "name": "colorbuddy",
   "displayName": "Color Buddy - Your VS Code Color Companion",
-  "description": "Adds color indicators and the VS Code color picker to configurable document types.",
-  "version": "0.0.2",
+  "description": "Adds color indicators and displays info on hover anywhere a color code is found. Quickly find an navigate to color definitions",
+  "version": "0.0.3",
   "publisher": "PAUlander",
   "repository": {
     "type": "git",
@@ -20,7 +20,7 @@
   ],
   "icon": "img/logoicon.png",
   "galleryBanner": {
-    "color": "#25e000",
+    "color": "#00892e",
     "theme": "dark"
   },
   "engines": {
